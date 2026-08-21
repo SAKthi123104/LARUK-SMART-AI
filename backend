@@ -1,0 +1,113 @@
+```
+
+
+
+from flask import Flask, render_template, request, jsonify
+import requests
+
+app = Flask(__name__)
+
+# ⚠️ Idha safe ah vechuko, yaarukum share pannadha
+GROQ_API_KEY = "*********************************************************************"
+GROQ_URL = "**************************************************************"
+MODEL_NAME = "llama-3.3-70b-versatile"   # free tier la best quality model
+
+SYSTEM_PROMPT = """
+You are LARUK — a sharp, friendly AI mentor who explains tech, coding, AI,
+and general life topics clearly. You talk like a real person chatting,
+not a lecture or essay.
+
+LANGUAGE:
+- If the user writes in Tanglish, reply in natural Tanglish (like a friend texting).
+- If the user writes in English, reply in clear, casual English.
+
+LENGTH RULE:
+- Casual messages ("hi", "how are you", "thanks") get a SHORT reply —
+  1 to 2 sentences only.
+- Give a longer, structured explanation only when the user asks a real
+  technical or conceptual question.
+- Keep replies as short as possible while still being complete and useful.
+
+STYLE:
+- Sound like a smart friend chatting, never robotic or like a textbook.
+- Max 1 emoji per reply, only when it fits naturally.
+- Never say "I don't understand" — always give your best answer.
+"""
+
+# Ovvoru user oda chat history memory la vechurukurom
+conversation_history = {}
+
+
+@app.route("/")
+def home():
+    return render_template("index.html")
+
+
+@app.route("/chat", methods=["POST"])
+def chat():
+    try:
+        data = request.get_json()
+        user_message = (data.get("message") or "").strip()
+        user_id = data.get("user_id", "default_user")
+
+        if not user_message:
+            return jsonify({"reply": "Hey! Ask me something! 🔥"})
+
+        history = conversation_history.get(user_id, [])
+        history.append({"role": "user", "content": user_message})
+
+        # Groq OpenAI-compatible format - system prompt + recent history
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-12:]
+
+        response = requests.post(
+            GROQ_URL,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {GROQ_API_KEY}"
+            },
+            json={
+                "model": MODEL_NAME,
+                "messages": messages,
+                "temperature": 0.7,
+                "max_tokens": 500
+            },
+            timeout=30
+        )
+
+        if response.status_code != 200:
+            return jsonify({
+                "reply": f"Groq API error vandhuchu (status {response.status_code}). API key correct-ah irukka nu check pannu."
+            }), 500
+
+        result = response.json()
+        reply_text = result["choices"][0]["message"]["content"].strip()
+
+        if not reply_text:
+            reply_text = "Hmm, sorry da, konjam issue vandhuchu. Try again! 🔥"
+
+        history.append({"role": "assistant", "content": reply_text})
+        conversation_history[user_id] = history[-20:]  # last 20 messages mattum vechurukurom
+
+        return jsonify({"reply": reply_text})
+
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            "reply": "Internet connection issue da! Net connection ah check pannu."
+        }), 500
+
+    except Exception as e:
+        return jsonify({"reply": f"Something went wrong: {str(e)}"}), 500
+
+
+@app.route("/reset", methods=["POST"])
+def reset():
+    data = request.get_json()
+    user_id = data.get("user_id", "default_user")
+    conversation_history.pop(user_id, None)
+    return jsonify({"status": "cleared"})
+
+
+if __name__ == "__main__":
+    app.run(debug=True, host="localhost", port=5000)
+
+    ```
